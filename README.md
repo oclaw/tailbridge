@@ -17,38 +17,30 @@ Desktop on macOS or Windows.
 
 ## Architecture
 
-```text
-Host machine
-|
-|  Browser / curl / CLI tools
-|        |
-|        |  http_proxy=http://127.0.0.1:8118
-|        |  https_proxy=http://127.0.0.1:8118
-|        v
-|  +----------------------------- Docker ------------------------------+
-|  |                                                                  |
-|  |  +------------------------------------------------------------+  |
-|  |  | Shared network namespace (http-proxy + tailnet-gateway)    |  |
-|  |  |                                                            |  |
-|  |  |  +----------------------+    +---------------------------+ |  |
-|  |  |  | http-proxy :8118     |    | tailnet-gateway          | |  |
-|  |  |  |                      |    | kernel mode (tailscale0) | |  |
-|  |  |  | dnsmasq (local):     |    | state: ./tailscale/state | |  |
-|  |  |  | .corp -> 100.100.100.100  +---------------------------+ |  |
-|  |  |  | public -> 8.8.8.8                                     |  |
-|  |  |  +----------------------+                                 |  |
-|  |  |                                                            |  |
-|  |  | Kernel routing table (shared):                            |  |
-|  |  |   <private subnet> -> tailscale0                          |  |
-|  |  |   0.0.0.0/0        -> eth0                                |  |
-|  |  +------------------------------------------------------------+  |
-|  +------------------------------------------------------------------+
-|
-|  Host Tailscale daemon - unaffected
-|                              |
-|                              v
-|                     Secondary tailnet
-|                    (internal services)
+```mermaid
+flowchart TB
+    subgraph host[Host machine]
+        tools[Browser / curl / CLI tools]
+        hostts[Host Tailscale daemon\nunaffected]
+    end
+
+    subgraph docker[Docker]
+        subgraph ns[Shared network namespace]
+            proxy[http-proxy :8118<br/>Privoxy + dnsmasq]
+            gateway[tailnet-gateway<br/>kernel mode via tailscale0<br/>state: ./tailscale/state]
+            routes[Shared routing table<br/>private subnets -> tailscale0<br/>default route -> eth0]
+        end
+    end
+
+    tailnet[Secondary tailnet<br/>internal services]
+    dns[Split DNS<br/>private suffixes -> 100.100.100.100<br/>public names -> public resolvers]
+
+    tools -->|http_proxy / https_proxy| proxy
+    proxy --> dns
+    dns --> gateway
+    proxy --> routes
+    gateway --> tailnet
+    hostts --> tailnet
 ```
 
 ### Traffic flow
