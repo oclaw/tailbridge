@@ -1,0 +1,103 @@
+name: tailbridge
+
+services:
+
+  # ----------------------------------------------------------------------------
+  # Tailscale gateway — connects to the secondary tailnet in kernel mode.
+  # Requires NET_ADMIN + /dev/net/tun to create a real tailscale0 interface,
+  # which enables proper subnet routing (--accept-routes) via the kernel
+  # routing table. Userspace mode was tried but its SOCKS5 proxy cannot forward
+  # traffic through subnet routers — only direct Tailscale peers (100.x.x.x)
+  # are reachable in that mode.
+  #
+  # DNS: Tailscale's DNS proxy at 100.100.100.100 is a virtual address routed via
+  # tailscale0 in policy routing table 52. It resolves private names (MagicDNS
+  # / split DNS) once tailscale0 is up. Docker's embedded resolver (127.0.0.11)
+  # is bypassed by setting dns: explicitly; 8.8.8.8 handles public DNS and
+  # bootstraps container startup before tailscale0 comes up.
+  #
+  # Privoxy's port is published here because Privoxy shares this network
+  # namespace (network_mode: service:tailnet-gateway).
+  # ----------------------------------------------------------------------------
+  tailnet-gateway:
+    # Pin to a specific version rather than the floating 'stable' tag.
+    # To find the current version: docker exec tailnet-gateway tailscale version
+    # To pin to a digest:          docker inspect tailnet-gateway --format='{{index .RepoDigests 0}}'
+    image: tailscale/tailscale:${TS_VERSION:-stable}
+    container_name: tailnet-gateway
+    hostname: tailbridge
+    environment:
+      - TS_USERSPACE=false
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_ACCEPT_DNS=true
+      - TS_EXTRA_ARGS=--accept-routes${TS_LOGIN_SERVER:+ --login-server=${TS_LOGIN_SERVER}}
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./tailscale/state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    dns:
+      - ${TAILNET_DNS_SERVER:-100.100.100.100}
+      - ${PUBLIC_DNS_PRIMARY:-8.8.8.8}
+      - ${PUBLIC_DNS_SECONDARY:-1.1.1.1}
+    ports:
+      - "127.0.0.1:${PRIVOXY_PORT:-8118}:8118"
+    networks:
+      - tsnet
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "tailscale status 2>&1 | grep -q '100\\.' && exit 0 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
+  # Privoxy — HTTP proxy bridging the host into Tailscale's network namespace.
+  # Shares tailnet-gateway's network namespace so all connections use the same
+  # routing table and DNS — private traffic routes via tailscale0, everything else
+  # via Docker's default gateway. No per-domain forwarding rules needed.
+  # ----------------------------------------------------------------------------
+  http-proxy:
+    build:
+      context: ./privoxy
+      dockerfile: Dockerfile
+    container_name: http-proxy
+    network_mode: "service:tailnet-gateway"
+    environment:
+      # PRIVATE_DNS_SUFFIXES is canonical; WORK_TLDS is accepted for migration.
+      - PRIVATE_DNS_SUFFIXES=${PRIVATE_DNS_SUFFIXES:-}
+      - WORK_TLDS=${WORK_TLDS:-}
+      - TAILNET_DNS_SERVER=${TAILNET_DNS_SERVER:-100.100.100.100}
+      - PUBLIC_DNS_PRIMARY=${PUBLIC_DNS_PRIMARY:-8.8.8.8}
+      - PUBLIC_DNS_SECONDARY=${PUBLIC_DNS_SECONDARY:-1.1.1.1}
+    depends_on:
+      tailnet-gateway:
+        condition: service_healthy
+    volumes:
+      - ./privoxy/config:/etc/privoxy/config:ro
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -x http://127.0.0.1:8118 http://config.privoxy.org/ > /dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+networks:
+  tsnet:
+    driver: bridge

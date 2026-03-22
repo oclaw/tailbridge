@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+
+# Tailscale runtime state and logs
+tailscale/state/*
+!tailscale/state/.gitkeep
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

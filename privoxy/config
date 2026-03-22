@@ -1,0 +1,22 @@
+# Privoxy configuration
+# Docs: https://www.privoxy.org/user-manual/config.html
+#
+# Role: HTTP proxy that bridges the host into Tailscale's network namespace.
+# All connections are forwarded DIRECT — routing is handled by the kernel:
+#   - Private suffixes  → resolved via tailnet DNS (dnsmasq) → routed via tailscale0
+#   - Everything else   → resolved via public DNS  (dnsmasq) → routed via Docker eth0
+#
+# No per-domain forwarding rules needed. The kernel routing table (populated
+# by Tailscale with subnet routes) decides where each packet goes.
+
+confdir         /etc/privoxy
+listen-address  0.0.0.0:8118
+
+enable-remote-toggle      0
+enable-remote-http-toggle 0
+enable-edit-actions       0
+enforce-blocks            0
+
+buffer-limit  4096
+
+forward  /  .
