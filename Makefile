@@ -1,5 +1,16 @@
 .DEFAULT_GOAL := help
 
+# tailbridge *is* the HTTP proxy this stack manages, so never route the
+# management commands themselves through it. Once you've pointed your shell at
+# the proxy (http_proxy/https_proxy, as `make status` suggests), tearing it
+# down leaves those vars pointing at a dead listener — and the very next
+# `make up` would try to build/pull/curl through it and hang or fail. Compose
+# also forwards these into image builds as build args, so unexporting them is
+# what keeps `up --build` working while the proxy is down.
+unexport http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
+export no_proxy := localhost,127.0.0.1,::1
+export NO_PROXY := localhost,127.0.0.1,::1
+
 .PHONY: help up down restart login status doctor logs logs-ts logs-proxy logs-privoxy add-domain test routes clean
 
 help: ## Show available targets
@@ -12,8 +23,9 @@ up: ## Start all services (builds Privoxy image if needed)
 down: ## Stop all services
 	docker compose down
 
-restart: ## Restart all services
-	docker compose restart
+restart: ## Restart all services (gateway first so the proxy can rejoin its netns)
+	docker compose restart tailnet-gateway
+	docker compose restart http-proxy
 
 login: ## Show Tailscale login URL and wait for auth (first run only)
 	@bash scripts/login.sh

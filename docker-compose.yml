@@ -25,7 +25,7 @@ services:
     # To pin to a digest:          docker inspect tailnet-gateway --format='{{index .RepoDigests 0}}'
     image: tailscale/tailscale:${TS_VERSION:-stable}
     container_name: tailnet-gateway
-    hostname: tailbridge
+    hostname: tailbridge-1
     environment:
       - TS_USERSPACE=false
       - TS_STATE_DIR=/var/lib/tailscale
